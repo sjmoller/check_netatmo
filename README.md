@@ -15,8 +15,10 @@ something to notify me when my Netatmo needed service, like new batteries.
 2. Create run directory /var/run/netatmo.
    Give your monitor read/write access to here:
 
+```
       chown monitor /var/run/netatmo
       chmod 755 /var/run/netatmo
+```
 
    where "monitor" is the username your Nagios or OP5 is using.
 
@@ -25,8 +27,10 @@ something to notify me when my Netatmo needed service, like new batteries.
 4. Configure your monitor.
 
    Add "check_netatmo" as a new Command.
-   command_name: check_netatmo
-   command_line: $USER1$/check_netatmo $ARG1$
+
+      command_name: check_netatmo
+
+      command_line: $USER1$/check_netatmo $ARG1$
 
 5. Define "Netatmo" host and services.
 
