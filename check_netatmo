@@ -1,0 +1,341 @@
+#!/usr/bin/perl
+#
+# Netatmo Weatherstation healthcheck Nagios plugin
+# Version 0.1
+#
+# 1) Create your client_id and client_secret at https://dev.netatmo.com.
+#
+# 2) Place this JSON data in /usr/local/etc/netatmo.conf:
+# {
+#   "client_id" : "your-client_id-here",
+#   "client_secret" : "your-client_secret-here",
+#   "username" : "your-netatmo-username-here",
+#   "password" : "your-netatmo-password-here"
+# }
+#
+# 3) Create directory /var/run/netatmo and make sure monitor has read/write access.
+#
+# 180822: 0.1: Intial version
+#
+# Soren Juul Moller, Aug 2018
+
+use strict;
+use warnings;
+use Fcntl qw(:flock);
+use Sys::Syslog;
+use Getopt::Long;
+use vars qw($opt_C $opt_m $opt_s $opt_w $opt_c $opt_f $opt_t $opt_S $opt_h);
+
+use LWP::UserAgent;
+use JSON;
+use DateTime::Format::DateParse;
+use lib '/opt/plugins';
+use utils qw(%ERRORS $TIMEOUT);
+# use Data::Dumper;
+
+my $PROGNAME = "check_netatmo";
+my $VERSION = "0.1";
+my $API = "https://api.netatmo.net";
+my $CONFFILE = '/usr/local/etc/netatmo.conf';
+my $RUN = '/var/run/netatmo';
+my $CACHE_TTL = 600;	# 10 min data cache
+my $LOCK;
+
+use constant OK => 0;
+use constant WARNING => 1;
+use constant CRITICAL => 2;
+use constant UNKNOWN => 3;
+
+Getopt::Long::Configure("bundling");
+GetOptions(
+	"C"   => \$opt_C, "config" => \$opt_C,
+	"S"   => \$opt_S, "status" => \$opt_S,
+	"m:s" => \$opt_m, "module:s" => \$opt_m,
+	"s:s" => \$opt_s, "sensor:s" => \$opt_s,
+	"w=i" => \$opt_w, "warning=i" => \$opt_w,
+	"c=i" => \$opt_c, "critical=i" => \$opt_c,
+	"t"   => \$opt_t, "time" => \$opt_t,
+	"f" =>   \$opt_f, "force" => \$opt_f,
+	"h"   => \$opt_h, "help" => \$opt_h
+);
+$opt_f = 0 unless defined $opt_f;
+$CONFFILE = $opt_C if defined $opt_C;
+
+sub print_help() {
+  print q{
+Usage:
+	check_netatmo -S
+	check_netatmo -m modulename -s sensorname [-w warnlevel] [-c critlevel] [-t] [-f]
+	check_netatmo -h
+
+Options:
+	-S		Netatmo status
+	-m <module>	Module name (Indoor/Outdoor/Rain Gauge/Wind Gauge).
+	-s <sensor>	Name of sensor
+	-w level	Warning level
+	-c level	Critical level
+	-t		Treat sensor value as a timestamp and compare against time now
+	-f		Force a new data retrieval
+	-h		This help message
+
+Examples:
+	check_netatmo -m "Rain Gauge" -s rf_status
+	check_netatmo -m "Wind Gauge" -s battery_vp
+	check_netatmo -m "Outdoor" -s last_seen -t
+	check_netatmo -m "Indoor" -s last_status_store -t
+  };
+  exit 0;
+}
+
+sub prettytime($) {
+  my $secs = shift;
+  my ($ss,$mi,$hh,$dd,$mm,$yy,@rest) = gmtime($secs);
+  $dd--;
+  return "${dd}d ${hh}h ${mi}m" if $dd > 0;
+  return "${hh}h ${mi}m ${ss}s" if $hh > 0;
+  return "${mi}m ${ss}s" if $mi > 0;
+  return "${ss}s";
+}
+
+sub exit_state($$) {
+  my ($state, $txt) = @_;
+  flock($LOCK, LOCK_UN) if defined $LOCK;
+  print qw(OK WARNING CRITICAL UNKNOWN)[$state] . " - $txt";
+  closelog();
+  exit $state;
+}
+
+sub exit_error($) {
+  my $txt = shift;
+  syslog('err', $txt);
+  exit_state(UNKNOWN, $txt);
+}
+
+sub load_json($) {
+  my $file = shift;
+  local $/;  # enable slurp
+  open(my $fh, "<", $file) || exit_error("$file not found?!");
+  my $json = <$fh>;
+  close($fh);
+  return from_json($json);
+}
+
+sub store_json($$) {
+  my $file = shift;
+  my $hashref = shift;
+  open(my $fh, ">", $file) || exit_error("cannot create $file: $!");
+  print $fh to_json($hashref, { utf8 => 1, pretty => 1 });
+  close($fh);
+}
+
+sub load_conf() {
+  my $conf = load_json($CONFFILE);
+  foreach (qw(client_id client_secret username password)) {
+    exit_error("$_ not defined in $CONFFILE") unless defined $conf->{$_};
+  }
+  return $conf;
+}
+
+sub get_token {
+  my $ua = LWP::UserAgent->new(agent => "$PROGNAME/$VERSION");
+  my $now = DateTime->now();
+  my $content;
+  my $dirty = 0;
+  my $conf;
+
+  if (!$opt_f && -s "$RUN/token.json") {
+    # Got a cache file, refresh login
+    my $store = load_json("$RUN/token.json");
+    my $lastupdate = DateTime::Format::DateParse->parse_datetime($store->{token_last_updated}, 'UTC');
+    my $delta = $now->epoch() - $lastupdate->epoch();
+    if ($delta > ($store->{expires_in} - 900)) {
+      # Refresh token
+      $conf = load_conf();
+      my $req = $ua->post(
+          "$API/oauth2/token",
+	  [
+	    grant_type => 'refresh_token',
+	    client_id => $conf->{client_id},
+	    client_secret => $conf->{client_secret},
+	    refresh_token => $store->{refresh_token}
+	  ]
+      );
+      if (!$req->is_success) {
+        syslog('warning', "failed to refresh oath2 token. Trying login.");
+        goto Login;
+      }
+      syslog('info', "oauth2 token refreshed");
+      $content = decode_json($req->decoded_content);
+      $store->{access_token} = $content->{access_token};
+      $store->{refresh_token} = $content->{refresh_token};
+      $store->{token_last_updated} = $now->datetime();
+      $dirty = 1;
+    }
+    $content = $store;
+  } else {
+    # No cache file, do login
+    Login:
+    $conf = load_conf() unless defined $conf;
+    my $req = $ua->post(
+	"$API/oauth2/token",
+	[
+	  grant_type => 'password',
+	  client_id => $conf->{client_id},
+	  client_secret => $conf->{client_secret},
+	  username => $conf->{username},
+	  password => $conf->{password},
+	  scope => 'read_station'
+	]
+    );
+    exit_error("Unable to login as ".$conf->{username}) unless $req->is_success;
+    syslog('info', "new oauth2 token generated using grant_type password");
+    $content = decode_json($req->decoded_content);
+    $content->{token_last_updated} = $now->datetime();
+    $dirty = 1;
+  }
+
+  # Update store if token was updated
+  store_json("$RUN/token.json", $content) if $dirty;
+
+  return $content;
+}
+
+sub getstationdata() {
+  my $now = DateTime->now();
+  my $content;
+  my $needs_update = 0;
+
+  if (!$opt_f && -s "$RUN/data.json") {
+    $content = load_json("$RUN/data.json");
+    my $lastupdate = $content->{time_server};
+    my $delta = $now->epoch() - $lastupdate;
+    $needs_update = 1 if $delta > $CACHE_TTL;
+  } else {
+    $needs_update = 1;
+  }
+
+  if ($needs_update) {
+    my $token = get_token();
+    exit_error("Login failed") unless defined $token;
+    my $ua = LWP::UserAgent->new(agent => "$PROGNAME/$VERSION");
+    my $req = $ua->post("$API/api/getstationsdata", [ access_token => $token->{access_token} ]);
+    exit_error("Data fetch failed: ".$req->status_line) unless $req->is_success;
+    $content = decode_json($req->decoded_content);
+    syslog('info', "$RUN/data.json fetched ok");
+    store_json("$RUN/data.json", $content);
+  }
+  return $content;
+}
+
+sub find_value($$$) {
+  my ($data, $modname, $valname) = @_;
+  my $devices = $data->{body}->{devices};
+  foreach my $device (@$devices) {
+    return $device->{$valname} if $device->{module_name} eq $opt_m;
+    foreach my $module (@{$device->{modules}}) {
+      return $module->{$valname} if $module->{module_name} eq $modname;
+    }
+  }
+  return undef;
+}
+
+################ MAIN ##################
+
+print_help() if defined $opt_h;
+
+openlog('check_netatmo', 'nofatal', 'local0');
+
+my $r;
+
+# Just in case of problems, let's not hang Nagios
+$SIG{'ALRM'} = sub {
+  exit_error("ERROR: No response from $API (timeout)");
+};
+alarm($TIMEOUT);
+
+# Exclusive access to getstationdata needed
+open($LOCK, '<', $CONFFILE) || exit_error("Cannot open $CONFFILE");
+flock($LOCK, LOCK_EX) || exit_error("Cannot lock $CONFFILE");
+
+$r = getstationdata();
+
+# Release lock
+flock($LOCK, LOCK_UN);
+close($LOCK);
+undef $LOCK;
+
+alarm(0);
+
+exit_error("getstationdata failed: $opt_m:$opt_s") unless defined $r;
+
+if (defined $opt_S) {
+  my $dt = DateTime->from_epoch(epoch => $r->{time_server}, time_zone => 'local');
+  exit_state($r->{status} eq "ok" ? OK : CRITICAL, "Netatmo status at ".$dt->ymd." ".$dt->hms);
+}
+
+if (!defined $opt_m && !defined $opt_s) {
+  exit_error("Module and sensor must be specified");
+}
+
+my $val = find_value($r, $opt_m, $opt_s);
+exit_error("Value $opt_m:$opt_s not found") unless defined $val;
+
+my $now = DateTime->now();
+
+# Reference: https://dev.netatmo.com/resources/technical/reference/weather
+
+if (defined $opt_t) {
+  $opt_c = 2*60*60 unless defined $opt_c;   # 2 hours
+  $opt_w = 1*60*60 unless defined $opt_w;   # 1 hour
+  my $delta = $now->epoch() - $val;
+  my $state = OK;
+  $state = WARNING if $delta > $opt_w;
+  $state = CRITICAL if $delta > $opt_c;
+  exit_state($state, "$opt_m last seen ".prettytime($delta)." ago|age=${delta}s;$opt_w;$opt_c;0;$opt_c");
+}
+
+if ($opt_s eq 'wifi_status') {
+  $opt_w = 71 unless defined $opt_w;
+  $opt_c = 86 unless defined $opt_c;
+  my $state = OK;
+  $state = WARNING if $val > $opt_w;
+  $state = CRITICAL if $val > $opt_c;
+  exit_state($state, "wifi_status $val|wifi_status=$val;$opt_w;$opt_c;40;100");
+}
+
+if ($opt_s eq 'rf_status') {
+  $opt_c = 150 unless defined $opt_c;
+  $opt_w = 120 unless defined $opt_w;
+  my $state = OK;
+  $state = WARNING if $val > $opt_w;
+  $state = CRITICAL if $val > $opt_c;
+  exit_state($state, "rf_status $val|rf_status=$val;$opt_w;$opt_c;30;200");
+}
+
+if ($opt_s eq 'battery_percent') {
+  $opt_w = 25 unless defined $opt_w;
+  $opt_c = 15 unless defined $opt_c;
+  my $state = OK;
+  $state = WARNING if $val < $opt_w;
+  $state = CRITICAL if $val < $opt_c;
+  exit_state($state, "battery_percent $val|battery_percent=${val}%;$opt_w;$opt_c");
+}
+
+if ($opt_s eq 'battery_vp') {
+  if ($opt_m eq 'Wind Gauge') {
+    $opt_w = 4770 unless defined $opt_w;
+    $opt_c = 4360 unless defined $opt_c;
+  } elsif ($opt_m eq 'Indoor') {
+    $opt_w = 4920 unless defined $opt_w;
+    $opt_c = 4560 unless defined $opt_c;
+  } else {
+    $opt_w = 4500 unless defined $opt_w;
+    $opt_c = 4000 unless defined $opt_c;
+  }
+  my $state = OK;
+  $state = WARNING if $val < $opt_w;
+  $state = CRITICAL if $val < $opt_c;
+  exit_state($state, "battery_vp $val|battery_vp=$val;$opt_w;$opt_c;3000;7000");
+}
+
+exit_error("Unknown sensor $opt_s");
