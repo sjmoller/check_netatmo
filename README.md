@@ -13,13 +13,11 @@ something to notify me when my Netatmo needed service, like new batteries.
    Save the client_id and client_secret in netatmo.conf JSON file.<br />
    Store netatmo.conf in /usr/local/etc.
 
-2. Create run directory /var/run/netatmo.
-
-   Give your monitor read/write access to here:
+2. Create run directory /var/run/netatmo (as root).
 
 ```
-      chown monitor /var/run/netatmo
-      chmod 755 /var/run/netatmo
+   # mkdir -m 755 /var/run/netatmo
+   # chown monitor /var/run/netatmo
 ```
 
    where "monitor" is the username your Nagios or OP5 is using.
@@ -30,64 +28,63 @@ something to notify me when my Netatmo needed service, like new batteries.
 
 1. Configure your monitor.
 
-   Add "check_netatmo" as a new Command.
+  Add "check_netatmo" as a new Command.
 
-      command_name: check_netatmo
-
-      command_line: $USER1$/check_netatmo $ARG1$
+    command_name: check_netatmo
+    command_line: $USER1$/check_netatmo $ARG1$
 
 2. Define "Netatmo" host and services.
 
    - Add "Netatmo" as a host. Replace the host-alive check with
 
-      check_netatmo -S
+    check_netatmo -S
 
 3. Define Netatmo service checks
 
-   - Indoor timestamp:
+  - Indoor timestamp:
 
-        check_netatmo -t -m Indoor -s last_status_store
+    check_netatmo -t -m Indoor -s last_status_store
 
-   - Outdoor RF status:
+  - Outdoor RF status:
 
-        check_netatmo -m Outdoor -s rf_status -w 120 -c 150
+    check_netatmo -m Outdoor -s rf_status -w 120 -c 150
 
-   - Outdoor battery voltage:
+  - Outdoor battery voltage:
 
-        check_netatmo -m Outdoor -s battery_vp
+    check_netatmo -m Outdoor -s battery_vp
 
-   - Outdoor timestamp:
+  - Outdoor timestamp:
 
-        check_netatmo -t -m Outdoor -s last_seen
+    check_netatmo -t -m Outdoor -s last_seen
 
-   - Rain Gauge RF status:
+  - Rain Gauge RF status:
 
-        check_netatmo -m "Rain Gauge" -s rf_status -w 120 -c 150
+    check_netatmo -m "Rain Gauge" -s rf_status -w 120 -c 150
 
-   - Rain Gauge battery voltage:
+  - Rain Gauge battery voltage:
 
-        check_netatmo -m "Rain Gauge" -s battery_vp
+    check_netatmo -m "Rain Gauge" -s battery_vp
 
-   - Rain Gauge timestamp:
+  - Rain Gauge timestamp:
 
-        check_netatmo -t -m "Rain Gauge" -s last_seen
+    check_netatmo -t -m "Rain Gauge" -s last_seen
 
-   - WIFI status:
+  - WIFI status:
 
-        check_netatmo -m Indoor -s wifi_status
+    check_netatmo -m Indoor -s wifi_status
 
-   - Wind Gauge RF status:
+  - Wind Gauge RF status:
 
-        check_netatmo -m "Wind Gauge" -s rf_status -w 120 -c 150
+    check_netatmo -m "Wind Gauge" -s rf_status -w 120 -c 150
 
-   - Wind Gauge battery voltage:
+  - Wind Gauge battery voltage:
 
-        check_netatmo -m "Wind Gauge" -s battery_vp
+    check_netatmo -m "Wind Gauge" -s battery_vp
 
-   - Wind Gauge timestamp:
+  - Wind Gauge timestamp:
 
-        check_netatmo -t -m "Wind Gauge" -s last_seen
+    check_netatmo -t -m "Wind Gauge" -s last_seen
 
 If you prefer, you can also check battery using percent:
 
-        check_netatmo -m "Rain Gauge" -s battery_percent -w 12 -c 6
+    check_netatmo -m "Rain Gauge" -s battery_percent -w 12 -c 6
