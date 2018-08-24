@@ -8,7 +8,7 @@ something to notify me when my Netatmo needed service, like new batteries.
 
 ### Install ###
 
-1. Create an App at https://dev/netatmo.com/
+1. Create an App at https://dev.netatmo.com/
    Save the client_id and client_secret in netatmo.conf JSON file.
    Store netatmo.conf in /usr/local/etc.
 
