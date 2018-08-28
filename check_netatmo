@@ -46,7 +46,7 @@ my $np = Nagios::Plugin->new(
 	version => $VERSION,
 	blurb => 'Netatmo check',
 	extra => "Examples:\n" .
-		 "   $PROGNAME -a '{body}->{devices}[0]->{dashboard_data}->{Temperature}' -w28: -c32: -p '28\;32\;28\;32'    (Indoor temperature)\n" .
+		 "   $PROGNAME -a '{body}->{devices}[0]->{dashboard_data}->{Temperature}' -w28: -c32: -p '28:32:28:32'    (Indoor temperature)\n" .
 		 "   $PROGNAME -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -t -w:3600 -c:7200 -m 'Outdoor seen %t ago'   (Outdoor timestamp)\n" .
 		 "   $PROGNAME -a '{body}->{devices}[0]->{modules}[2]->{dashboard_data}->{WindAngle}' -w\@220:280 -c\@280:330  (wind angle)\n".
 		 "   $PROGNAME -a '{body}->{status}' -e ok\n" .
@@ -87,9 +87,9 @@ $np->add_arg(
 $np->add_arg(
 	spec => 'perfdata|p:s',
 	help => "-p, --perfdata [thresholds]\n" .
-		"   Nagios performance data format: name=value[;warnlevel[;critlevel[;min[;max]]]]".
+		"   Nagios performance data format: name=value[:warnlevel[:critlevel[:min[:max]]]]".
 		"   Format defaults to \"label=value\"\n" .
-		"   threshols:  warn[;crit[;min[;max]]] - example: -p '25\\;50\\;25\\;50'"
+		"   threshols:  warn[;crit[;min[;max]]] - example: -p '25:50:25:50'"
 );
 $np->add_arg(
 	spec => 'message|m=s',
@@ -306,9 +306,12 @@ if ($np->opts->message) {
   $str .= " $val";
 }
 
-if ($np->opts->perfdata) {
+if (my $p = $np->opts->perfdata) {
   $str .= "|$attr=$val";
-  $str .= ';'.$np->opts->perfdata if length($np->opts->perfdata) > 0;
+  if (length($p) > 0) {
+    $p =~ s/:/;/g;
+    $str .= ";$p";
+  }
 }
 
 exit_state($res, "$str");
