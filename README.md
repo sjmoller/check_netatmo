@@ -41,15 +41,16 @@ something to notify me when my Netatmo needed service, like new batteries.
 
 3. Define Netatmo service checks
 
-  Assuming one device and one Outdoor module (module 0), one rain gauge (module 1) and one wind gauge (module 2).
+  Assuming one device and one Outdoor module (module 0), one rain gauge (module 1) and one wind gauge (module 2).<br />
+  See also https://dev.netatmo.com/resources/technical/reference/weather/getstationsdata for thresholds.
 
   - Indoor timestamp:
 
-    check_netatmo -a '{body}->{devices}[0]->{last_status_store}' -t -w:3600 -c:7200 -p '3600:7200' -m 'Indoor last seen %t ago'
+    check_netatmo -a '{body}->{devices}[0]->{last_status_store}' -t -w3600 -c7200 -p '3600:7200' -m 'Indoor last seen %t ago'
 
   - Outdoor RF status:
 
-    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{rf_status}' -w:120 -c:150 -p '120:150:40:200'
+    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{rf_status}' -w120 -c150 -p '120:150:40:200'
 
   - Outdoor battery voltage:
 
@@ -57,21 +58,20 @@ something to notify me when my Netatmo needed service, like new batteries.
 
   - Outdoor timestamp:
 
-    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -t -w:3600 -c:7200 -p '3600:7200' -m 'Outdoor last seen %t ago'
+    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -t -w3600 -c7200 -p '3600:7200' -m 'Outdoor last seen %t ago'
 
   - ... the same from rain and wind gauge, just with module index 1 and 2.
 
   - WIFI status:
 
-    check_netatmo -a '{body}->{devices}[0]->{wifi_status}' -w:75 -c:86 -p '75:86:40:100'
+    check_netatmo -a '{body}->{devices}[0]->{wifi_status}' -w75 -c86 -p '75:86:40:100'
 
 If you prefer, you can also check battery using percent:
 
     check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{battery_percent}' -w12: -c6: -p '12:6:0:100'
 
-Exotic checks can also be done:
-
-    Give a warning if wind angle is between 220 and 280, and a critical if wind angle is between 281 and 330
+Exotic checks can also be done:<br />
+Give a warning if wind angle is between 220 and 280, and a critical if wind angle is between 281 and 330
 
     check_netatmo -a '{body}->{devices}[0]->{modules}[2]->{dashboard_data}->{WindAngle}' -w@220:280 -c@281:330 -m 'Wind angle is %v degrees'
 
