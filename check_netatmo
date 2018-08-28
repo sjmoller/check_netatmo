@@ -42,12 +42,12 @@ my $LOCK;
 ##############################################################################
 
 my $np = Nagios::Plugin->new(
-	usage => 'Usage: %s -a attr [-w INT:INT -c INT:INT -t -e equal-str -n not-equal-str -p perfdata -m message-template]',
+	usage => 'Usage: %s -a attr [-w INT:INT -c INT:INT -T -e equal-str -n not-equal-str -p perfdata -m message-template]',
 	version => $VERSION,
 	blurb => 'Netatmo check',
 	extra => "Examples:\n" .
 		 "   $PROGNAME -a '{body}->{devices}[0]->{dashboard_data}->{Temperature}' -w28: -c32: -p '28:32:28:32'    (Indoor temperature)\n" .
-		 "   $PROGNAME -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -t -w:3600 -c:7200 -m 'Outdoor seen %t ago'   (Outdoor timestamp)\n" .
+		 "   $PROGNAME -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -T -w:3600 -c:7200 -m 'Outdoor seen %t ago'   (Outdoor timestamp)\n" .
 		 "   $PROGNAME -a '{body}->{devices}[0]->{modules}[2]->{dashboard_data}->{WindAngle}' -w\@220:280 -c\@280:330  (wind angle)\n".
 		 "   $PROGNAME -a '{body}->{status}' -e ok\n" .
 		 "see also https://nagios-plugins.org/doc/guidelines.html#THRESHOLDFORMAT",
@@ -71,7 +71,7 @@ $np->add_arg(
 );
 $np->add_arg(
 	spec => 'timestamp|t',
-	help => "-t, --timestamp\n" .
+	help => "-T, --timestamp\n" .
 		"   value is an epoch. Compare to epoch now (diff in seconds)"
 );
 $np->add_arg(

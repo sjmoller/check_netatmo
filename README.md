@@ -47,7 +47,7 @@ something to notify me when my Netatmo needed service, like new batteries.
 
   - Indoor timestamp:
 
-    check_netatmo -a '{body}->{devices}[0]->{last_status_store}' -t -w3600 -c7200 -p '3600:7200' -m 'Indoor last seen %t ago'
+    check_netatmo -a '{body}->{devices}[0]->{last_status_store}' -T -w3600 -c7200 -p '3600:7200' -m 'Indoor last seen %t ago'
 
   - Outdoor RF status:
 
@@ -59,7 +59,7 @@ something to notify me when my Netatmo needed service, like new batteries.
 
   - Outdoor timestamp:
 
-    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -t -w3600 -c7200 -p '3600:7200' -m 'Outdoor last seen %t ago'
+    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -T -w3600 -c7200 -p '3600:7200' -m 'Outdoor last seen %t ago'
 
   - ... the same from rain and wind gauge, just with module index 1 and 2.
 
@@ -76,4 +76,39 @@ Give a warning if wind angle is between 220 and 280, and a critical if wind angl
 
     check_netatmo -a '{body}->{devices}[0]->{modules}[2]->{dashboard_data}->{WindAngle}' -w@220:280 -c@281:330 -m 'Wind angle is %v degrees'
 
-See /var/run/data.json for possible values to check.
+See /var/run/netatmo/data.json for possible values to check.
+
+### Usage ###
+
+```
+Usage: check_netatmo -a attr [-w INT:INT -c INT:INT -T -e equal-str -n not-equal-str -p perfdata -m message-template]
+
+ -?, --usage
+   Print usage information
+ -h, --help
+   Print detailed help screen
+ -V, --version
+   Print version information
+ --extra-opts=[section][@file]
+   Read options from an ini file. See http://nagiosplugins.org/extra-opts
+   for usage and examples.
+ -a, --attribute {attr}->{attr}
+ -w, --warning INT:INT
+ -c, --critical INT:INT
+ -T, --timestamp
+   value is an epoch. Compare to epoch now (diff in seconds)
+ -e, --equals str
+   critical if not equal
+ -n, --notequals str
+   critical if equal
+ -p, --perfdata [thresholds]
+   Nagios performance data format: name=value[:warnlevel[:critlevel[:min[:max]]]]   Format defaults to "label=value"
+   threshols:  warn[;crit[;min[;max]]] - example: -p '25:50:25:50'
+ -m, --message message-template
+   Format: 'Value %a is %v' or 'device seen %t ago'
+   where %a is attribute name, %v is value and %t is duration
+ -t, --timeout=INTEGER
+   Seconds before plugin times out (default: 15)
+ -v, --verbose
+   Show details for command-line debugging (can repeat up to 3 times)
+```
