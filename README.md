@@ -42,7 +42,8 @@ something to notify me when my Netatmo needed service, like new batteries.
 3. Define Netatmo service checks
 
   Assuming one device and one Outdoor module (module 0), one rain gauge (module 1) and one wind gauge (module 2).<br />
-  See also https://dev.netatmo.com/resources/technical/reference/weather/getstationsdata for thresholds.
+  See also https://dev.netatmo.com/resources/technical/reference/weather/getstationsdata for thresholds.<br />
+  Also https://nagios-plugins.org/doc/guidelines.html#THRESHOLDFORMAT for Nagios threshold parameter format.
 
   - Indoor timestamp:
 
