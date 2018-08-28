@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 #
 # Netatmo Weatherstation healthcheck Nagios plugin
-# Version 0.1
+# Version 0.2
 #
 # 1) Create your client_id and client_secret at https://dev.netatmo.com.
 #
@@ -16,76 +16,90 @@
 # 3) Create directory /var/run/netatmo and make sure monitor has read/write access.
 #
 # 180822: 0.1: Intial version
+# 180822: 0.2: Use Nagios::Plugin to parse arguments. All values can now be tested.
 #
 # Soren Juul Moller, Aug 2018
 
 use strict;
 use warnings;
+use Nagios::Plugin;
 use Fcntl qw(:flock);
 use Sys::Syslog;
-use Getopt::Long;
-use vars qw($opt_C $opt_m $opt_s $opt_w $opt_c $opt_f $opt_t $opt_S $opt_h);
-
-use LWP::UserAgent;
 use JSON;
+use LWP::UserAgent;
 use DateTime::Format::DateParse;
 use lib '/opt/plugins';
-use utils qw(%ERRORS $TIMEOUT);
-# use Data::Dumper;
+use utils qw($TIMEOUT);
 
 my $PROGNAME = "check_netatmo";
-my $VERSION = "0.1";
+my $VERSION = "0.2";
 my $API = "https://api.netatmo.net";
 my $CONFFILE = '/usr/local/etc/netatmo.conf';
 my $RUN = '/var/run/netatmo';
 my $CACHE_TTL = 600;	# 10 min data cache
 my $LOCK;
 
-use constant OK => 0;
-use constant WARNING => 1;
-use constant CRITICAL => 2;
-use constant UNKNOWN => 3;
+##############################################################################
 
-Getopt::Long::Configure("bundling");
-GetOptions(
-	"C"   => \$opt_C, "config" => \$opt_C,
-	"S"   => \$opt_S, "status" => \$opt_S,
-	"m:s" => \$opt_m, "module:s" => \$opt_m,
-	"s:s" => \$opt_s, "sensor:s" => \$opt_s,
-	"w=i" => \$opt_w, "warning=i" => \$opt_w,
-	"c=i" => \$opt_c, "critical=i" => \$opt_c,
-	"t"   => \$opt_t, "time" => \$opt_t,
-	"f" =>   \$opt_f, "force" => \$opt_f,
-	"h"   => \$opt_h, "help" => \$opt_h
+my $np = Nagios::Plugin->new(
+	usage => 'Usage: %s -a attr [-w INT:INT -c INT:INT -t -e equal-str -n not-equal-str -p perfdata -m message-template]',
+	version => $VERSION,
+	blurb => 'Netatmo check',
+	extra => "Examples:\n" .
+		 "   $PROGNAME -a '{body}->{devices}[0]->{dashboard_data}->{Temperature}' -w28: -c32: -p '28\;32\;28\;32'    (Indoor temperature)\n" .
+		 "   $PROGNAME -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -t -w:3600 -c:7200 -m 'Outdoor seen %t ago'   (Outdoor timestamp)\n" .
+		 "   $PROGNAME -a '{body}->{devices}[0]->{modules}[2]->{dashboard_data}->{WindAngle}' -w\@220:280 -c\@280:330  (wind angle)\n".
+		 "   $PROGNAME -a '{body}->{status}' -e ok\n" .
+		 "see also https://nagios-plugins.org/doc/guidelines.html#THRESHOLDFORMAT",
+	url => 'https://github.com/sjmoller/check_netatmo',
+	plugin => $PROGNAME,
+	timeout => 15,
+	shortname => 'Netatmo'
 );
-$opt_f = 0 unless defined $opt_f;
-$CONFFILE = $opt_C if defined $opt_C;
+$np->add_arg(
+	spec => 'attribute|a=s',
+	help => "-a, --attribute {attr}->{attr}",
+	required => 1
+);
+$np->add_arg(
+	spec => 'warning|w=s',
+	help => '-w, --warning INT:INT',
+);
+$np->add_arg(
+	spec => 'critical|c=s',
+	help => '-c, --critical INT:INT',
+);
+$np->add_arg(
+	spec => 'timestamp|t',
+	help => "-t, --timestamp\n" .
+		"   value is an epoch. Compare to epoch now (diff in seconds)"
+);
+$np->add_arg(
+	spec => 'equal|e=s',
+	help => '-e, --equals str' .
+		"\n   critical if not equal"
+);
+$np->add_arg(
+	spec => 'notequal|n=s',
+	help => '-n, --notequals str' .
+		"\n   critical if equal"
+);
+$np->add_arg(
+	spec => 'perfdata|p:s',
+	help => "-p, --perfdata [thresholds]\n" .
+		"   Nagios performance data format: name=value[;warnlevel[;critlevel[;min[;max]]]]".
+		"   Format defaults to \"label=value\"\n" .
+		"   threshols:  warn[;crit[;min[;max]]] - example: -p '25\\;50\\;25\\;50'"
+);
+$np->add_arg(
+	spec => 'message|m=s',
+	help => "-m, --message message-template\n" .
+		"   Format: 'Value %a is %v' or 'device seen %t ago'\n" .
+		"   where %a is attribute name, %v is value and %t is duration"
+);
+$np->getopts;
 
-sub print_help() {
-  print q{
-Usage:
-	check_netatmo -S
-	check_netatmo -m modulename -s sensorname [-w warnlevel] [-c critlevel] [-t] [-f]
-	check_netatmo -h
-
-Options:
-	-S		Netatmo status
-	-m <module>	Module name (Indoor/Outdoor/Rain Gauge/Wind Gauge).
-	-s <sensor>	Name of sensor
-	-w level	Warning level
-	-c level	Critical level
-	-t		Treat sensor value as a timestamp and compare against time now
-	-f		Force a new data retrieval
-	-h		This help message
-
-Examples:
-	check_netatmo -m "Rain Gauge" -s rf_status
-	check_netatmo -m "Wind Gauge" -s battery_vp
-	check_netatmo -m "Outdoor" -s last_seen -t
-	check_netatmo -m "Indoor" -s last_status_store -t
-  };
-  exit 0;
-}
+##############################################################################
 
 sub prettytime($) {
   my $secs = shift;
@@ -100,7 +114,7 @@ sub prettytime($) {
 sub exit_state($$) {
   my ($state, $txt) = @_;
   flock($LOCK, LOCK_UN) if defined $LOCK;
-  print qw(OK WARNING CRITICAL UNKNOWN)[$state] . " - $txt";
+  print qw(OK WARNING CRITICAL UNKNOWN)[$state] . " - $txt\n";
   closelog();
   exit $state;
 }
@@ -143,7 +157,7 @@ sub get_token {
   my $dirty = 0;
   my $conf;
 
-  if (!$opt_f && -s "$RUN/token.json") {
+  if (-s "$RUN/token.json") {
     # Got a cache file, refresh login
     my $store = load_json("$RUN/token.json");
     my $lastupdate = DateTime::Format::DateParse->parse_datetime($store->{token_last_updated}, 'UTC');
@@ -205,7 +219,7 @@ sub getstationdata() {
   my $content;
   my $needs_update = 0;
 
-  if (!$opt_f && -s "$RUN/data.json") {
+  if (-s "$RUN/data.json") {
     $content = load_json("$RUN/data.json");
     my $lastupdate = $content->{time_server};
     my $delta = $now->epoch() - $lastupdate;
@@ -227,25 +241,9 @@ sub getstationdata() {
   return $content;
 }
 
-sub find_value($$$) {
-  my ($data, $modname, $valname) = @_;
-  my $devices = $data->{body}->{devices};
-  foreach my $device (@$devices) {
-    return $device->{$valname} if $device->{module_name} eq $opt_m;
-    foreach my $module (@{$device->{modules}}) {
-      return $module->{$valname} if $module->{module_name} eq $modname;
-    }
-  }
-  return undef;
-}
-
-################ MAIN ##################
-
-print_help() if defined $opt_h;
+##############################################################################
 
 openlog('check_netatmo', 'nofatal', 'local0');
-
-my $r;
 
 # Just in case of problems, let's not hang Nagios
 $SIG{'ALRM'} = sub {
@@ -257,7 +255,7 @@ alarm($TIMEOUT);
 open($LOCK, '<', $CONFFILE) || exit_error("Cannot open $CONFFILE");
 flock($LOCK, LOCK_EX) || exit_error("Cannot lock $CONFFILE");
 
-$r = getstationdata();
+my $data = getstationdata();
 
 # Release lock
 flock($LOCK, LOCK_UN);
@@ -266,76 +264,51 @@ undef $LOCK;
 
 alarm(0);
 
-exit_error("getstationdata failed: $opt_m:$opt_s") unless defined $r;
+my $attr = $np->opts->attribute;
 
-if (defined $opt_S) {
-  my $dt = DateTime->from_epoch(epoch => $r->{time_server}, time_zone => 'local');
-  exit_state($r->{status} eq "ok" ? OK : CRITICAL, "Netatmo status at ".$dt->ymd." ".$dt->hms);
+my $val;
+eval '$val = $data->'.$attr;
+die("$attr not found\n") unless defined $val;
+
+my $res = 0;
+if ($np->opts->equal) {
+  $res = 2 if $val ne $np->opts->equal;
+}
+elsif ($np->opts->notequal) {
+  $res = 2 if $val eq $np->opts->notequal;
+}
+elsif ($np->opts->timestamp) {
+  my $delta = DateTime->now()->epoch() - $val;
+  $res = $np->check_threshold(
+	check => $delta,
+	warning => $np->opts->warning,
+	critical => $np->opts->critical
+  );
+  $val = $delta;
+}
+else {
+  $res = $np->check_threshold(
+	check => $val,
+	warning => $np->opts->warning,
+	critical => $np->opts->critical,
+  );
 }
 
-if (!defined $opt_m && !defined $opt_s) {
-  exit_error("Module and sensor must be specified");
+$attr =~ s/.*{([a-z0-9_]+)}$/$1/i;
+my $str = "$attr";
+if ($np->opts->message) {
+  $str = $np->opts->message;
+  $str =~ s/%a/$attr/g;
+  $str =~ s/%v/$val/g;
+  my $t = prettytime($val);
+  $str =~ s/%t/$t/g;
+} else {
+  $str .= " $val";
 }
 
-my $val = find_value($r, $opt_m, $opt_s);
-exit_error("Value $opt_m:$opt_s not found") unless defined $val;
-
-my $now = DateTime->now();
-
-# Reference: https://dev.netatmo.com/resources/technical/reference/weather
-
-if (defined $opt_t) {
-  $opt_c = 2*60*60 unless defined $opt_c;   # 2 hours
-  $opt_w = 1*60*60 unless defined $opt_w;   # 1 hour
-  my $delta = $now->epoch() - $val;
-  my $state = OK;
-  $state = WARNING if $delta > $opt_w;
-  $state = CRITICAL if $delta > $opt_c;
-  exit_state($state, "$opt_m last seen ".prettytime($delta)." ago|age=${delta}s;$opt_w;$opt_c;0;$opt_c");
+if ($np->opts->perfdata) {
+  $str .= "|$attr=$val";
+  $str .= ';'.$np->opts->perfdata if length($np->opts->perfdata) > 0;
 }
 
-if ($opt_s eq 'wifi_status') {
-  $opt_w = 71 unless defined $opt_w;
-  $opt_c = 86 unless defined $opt_c;
-  my $state = OK;
-  $state = WARNING if $val > $opt_w;
-  $state = CRITICAL if $val > $opt_c;
-  exit_state($state, "wifi_status $val|wifi_status=$val;$opt_w;$opt_c;40;100");
-}
-
-if ($opt_s eq 'rf_status') {
-  $opt_c = 150 unless defined $opt_c;
-  $opt_w = 120 unless defined $opt_w;
-  my $state = OK;
-  $state = WARNING if $val > $opt_w;
-  $state = CRITICAL if $val > $opt_c;
-  exit_state($state, "rf_status $val|rf_status=$val;$opt_w;$opt_c;30;200");
-}
-
-if ($opt_s eq 'battery_percent') {
-  $opt_w = 25 unless defined $opt_w;
-  $opt_c = 15 unless defined $opt_c;
-  my $state = OK;
-  $state = WARNING if $val < $opt_w;
-  $state = CRITICAL if $val < $opt_c;
-  exit_state($state, "battery_percent $val|battery_percent=${val}%;$opt_w;$opt_c");
-}
-
-if ($opt_s eq 'battery_vp') {
-  if ($opt_m eq 'Wind Gauge') {
-    $opt_w = 4770 unless defined $opt_w;
-    $opt_c = 4360 unless defined $opt_c;
-  } elsif ($opt_m eq 'Indoor') {
-    $opt_w = 4920 unless defined $opt_w;
-    $opt_c = 4560 unless defined $opt_c;
-  } else {
-    $opt_w = 4500 unless defined $opt_w;
-    $opt_c = 4000 unless defined $opt_c;
-  }
-  my $state = OK;
-  $state = WARNING if $val < $opt_w;
-  $state = CRITICAL if $val < $opt_c;
-  exit_state($state, "battery_vp $val|battery_vp=$val;$opt_w;$opt_c;3000;7000");
-}
-
-exit_error("Unknown sensor $opt_s");
+exit_state($res, "$str");

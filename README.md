@@ -1,7 +1,7 @@
 check_netatmo
 =============
 
-Nagios / OP5 plugin for checking the health of your Netatmo Weatherstation.
+Nagios / OP5 plugin for checking values from your Netatmo Weatherstation.
 
 I have no relation with the Netatmo company. I wrote this because I needed
 something to notify me when my Netatmo needed service, like new batteries.
@@ -37,54 +37,42 @@ something to notify me when my Netatmo needed service, like new batteries.
 
    - Add "Netatmo" as a host. Replace the host-alive check with
 
-    check_netatmo -S
+    check_netatmo -a '{body}->{status}' -e ok
 
 3. Define Netatmo service checks
 
+  Assuming one device and one Outdoor module (module 0), one rain gauge (module 1) and one wind gauge (module 2).
+
   - Indoor timestamp:
 
-    check_netatmo -t -m Indoor -s last_status_store
+    check_netatmo -a '{body}->{devices}[0]->{last_status_store}' -t -w:3600 -c:7200 -p '3600\;7200' -m 'Indoor last seen %t ago'
 
   - Outdoor RF status:
 
-    check_netatmo -m Outdoor -s rf_status -w 120 -c 150
+    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{rf_status}' -w:120 -c:150 -p '120\;150\;40\;200'
 
   - Outdoor battery voltage:
 
-    check_netatmo -m Outdoor -s battery_vp
+    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{battery_vp}' -w4500: -c4000: -p '4500\:4000\;3500\;6500'
 
   - Outdoor timestamp:
 
-    check_netatmo -t -m Outdoor -s last_seen
+    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -t -w:3600 -c:7200 -p '3600\;7200' -m 'Outdoor last seen %t ago'
 
-  - Rain Gauge RF status:
-
-    check_netatmo -m "Rain Gauge" -s rf_status -w 120 -c 150
-
-  - Rain Gauge battery voltage:
-
-    check_netatmo -m "Rain Gauge" -s battery_vp
-
-  - Rain Gauge timestamp:
-
-    check_netatmo -t -m "Rain Gauge" -s last_seen
+  - ... the same from rain and wind gauge, just with module index 1 and 2.
 
   - WIFI status:
 
-    check_netatmo -m Indoor -s wifi_status
-
-  - Wind Gauge RF status:
-
-    check_netatmo -m "Wind Gauge" -s rf_status -w 120 -c 150
-
-  - Wind Gauge battery voltage:
-
-    check_netatmo -m "Wind Gauge" -s battery_vp
-
-  - Wind Gauge timestamp:
-
-    check_netatmo -t -m "Wind Gauge" -s last_seen
+    check_netatmo -a '{body}->{devices}[0]->{wifi_status}' -w:75 -c:86 -p '75\;86\;40\;100'
 
 If you prefer, you can also check battery using percent:
 
-    check_netatmo -m "Rain Gauge" -s battery_percent -w 12 -c 6
+    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{battery_percent}' -w12: -c6: -p '12\:6\;0\;100'
+
+Exotic checks can also be done:
+
+    Give a warning if wind angle is between 220 and 280, and a critical if wind angle is between 281 and 330
+
+    check_netatmo -a '{body}->{devices}[0]->{modules}[2]->{dashboard_data}->{WindAngle}' -w@220:280 -c@281:330 -m 'Wind angle is %v degrees'
+
+See /var/run/data.json for possible values to check.
