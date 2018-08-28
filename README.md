@@ -10,36 +10,31 @@ something to notify me when my Netatmo needed service, like new batteries.
 
 1. Create an App at https://dev.netatmo.com/
 
-   Save the client_id and client_secret in netatmo.conf JSON file.<br />
-   Store netatmo.conf in /usr/local/etc.
-
-2. Create run directory /var/run/netatmo (as root).
-
+   Save the client_id and client_secret in netatmo.conf JSON file. See example file.<br />
+   Store netatmo.conf as /usr/local/etc/netatmo.conf. Make sure it's only readable for the monitor user:
 ```
-   # mkdir -m 755 /var/run/netatmo
-   # chown monitor /var/run/netatmo
+    chown monitor /usr/local/etc/netatmo.conf     (assuming your monitor user is 'monitor')
+    chmod 400 /usr/local/etc/netatmo.conf
 ```
 
-   where "monitor" is the username your Nagios or OP5 is using.
-
-3. Install check_netatmo in the monitor plugin directory.
+2. Install check_netatmo in the monitor plugin directory.
 
 ### Configure Monitor ###
 
-1. Configure your monitor.
+3. Configure your monitor.
 
   Add "check_netatmo" as a new Command.
 
     command_name: check_netatmo
     command_line: $USER1$/check_netatmo $ARG1$
 
-2. Define "Netatmo" host and services.
+4. Define "Netatmo" host and services.
 
    - Add "Netatmo" as a host. Replace the host-alive check with
 
     check_netatmo -a '{body}->{status}' -e ok
 
-3. Define Netatmo service checks
+5. Define Netatmo service checks
 
   Assuming one device and one Outdoor module (module 0), one rain gauge (module 1) and one wind gauge (module 2).<br />
   See also https://dev.netatmo.com/resources/technical/reference/weather/getstationsdata for thresholds.<br />
@@ -76,7 +71,7 @@ Give a warning if wind angle is between 220 and 280, and a critical if wind angl
 
     check_netatmo -a '{body}->{devices}[0]->{modules}[2]->{dashboard_data}->{WindAngle}' -w@220:280 -c@281:330 -m 'Wind angle is %v degrees'
 
-See /var/run/netatmo/data.json for possible values to check.
+See $HOME/var/netatmo/data.json for possible values to check. $HOME is the home for the user running your monitoring.
 
 ### Usage ###
 

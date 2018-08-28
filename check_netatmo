@@ -13,7 +13,7 @@
 #   "password" : "your-netatmo-password-here"
 # }
 #
-# 3) Create directory /var/run/netatmo and make sure monitor has read/write access.
+# 3) See your data arrive in $HOME/var/netatmo. $HOME is the home of the user running this plugin.
 #
 # 180822: 0.1: Intial version
 # 180822: 0.2: Use Nagios::Plugin to parse arguments. All values can now be tested.
@@ -24,6 +24,7 @@ use strict;
 use warnings;
 use Nagios::Plugin;
 use Fcntl qw(:flock);
+use File::Path qw(make_path);
 use Sys::Syslog;
 use JSON;
 use LWP::UserAgent;
@@ -35,7 +36,7 @@ my $PROGNAME = "check_netatmo";
 my $VERSION = "0.2";
 my $API = "https://api.netatmo.net";
 my $CONFFILE = '/usr/local/etc/netatmo.conf';
-my $RUN = '/var/run/netatmo';
+my $RUN = "$ENV{HOME}/var/netatmo";
 my $CACHE_TTL = 600;	# 10 min data cache
 my $LOCK;
 
@@ -70,7 +71,7 @@ $np->add_arg(
 	help => '-c, --critical INT:INT',
 );
 $np->add_arg(
-	spec => 'timestamp|t',
+	spec => 'timestamp|T',
 	help => "-T, --timestamp\n" .
 		"   value is an epoch. Compare to epoch now (diff in seconds)"
 );
@@ -244,6 +245,10 @@ sub getstationdata() {
 ##############################################################################
 
 openlog('check_netatmo', 'nofatal', 'local0');
+
+unless (-d $RUN) {
+  exit_error("Cannot create $RUN: $!\n") if make_path($RUN, 0755) != 1;
+}
 
 # Just in case of problems, let's not hang Nagios
 $SIG{'ALRM'} = sub {
