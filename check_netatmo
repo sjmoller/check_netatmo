@@ -129,16 +129,15 @@ sub exit_error($) {
 sub load_json($) {
   my $file = shift;
   local $/;  # enable slurp
-  open(my $fh, "<", $file) || exit_error("$file not found?!");
+  open(my $fh, '<', $file) || exit_error("$file read error: $!");
   my $json = <$fh>;
   close($fh);
   return from_json($json);
 }
 
 sub store_json($$) {
-  my $file = shift;
-  my $hashref = shift;
-  open(my $fh, ">", $file) || exit_error("cannot create $file: $!");
+  my ($file, $hashref) = @_;
+  open(my $fh, '>', $file) || exit_error("cannot create $file: $!");
   print $fh to_json($hashref, { utf8 => 1, pretty => 1 });
   close($fh);
 }
@@ -177,7 +176,7 @@ sub get_token {
       );
       if (!$req->is_success) {
         syslog('warning', "failed to refresh oath2 token. Trying login.");
-        goto Login;
+        goto Login;   # not nice, but handy :-)
       }
       syslog('info', "oauth2 token refreshed");
       $content = decode_json($req->decoded_content);
@@ -188,7 +187,7 @@ sub get_token {
     }
     $content = $store;
   } else {
-    # No cache file, do login
+    # No cache file or oauth2 refresh failed. Do login
     Login:
     $conf = load_conf() unless defined $conf;
     my $req = $ua->post(
@@ -271,20 +270,23 @@ alarm(0);
 
 my $attr = $np->opts->attribute;
 
+# remove dangerous characters before eval
+$attr =~ tr/;()|\`\'\"\\/_/;
+
 my $val;
 eval '$val = $data->'.$attr;
-die("$attr not found\n") unless defined $val;
+exit_error("$attr not found") unless defined $val;
 
-my $res = 0;
+my $state = OK;
 if ($np->opts->equal) {
-  $res = 2 if $val ne $np->opts->equal;
+  $state = CRITICAL if $val ne $np->opts->equal;
 }
 elsif ($np->opts->notequal) {
-  $res = 2 if $val eq $np->opts->notequal;
+  $state = CRITICAL if $val eq $np->opts->notequal;
 }
 elsif ($np->opts->timestamp) {
   my $delta = DateTime->now()->epoch() - $val;
-  $res = $np->check_threshold(
+  $state = $np->check_threshold(
 	check => $delta,
 	warning => $np->opts->warning,
 	critical => $np->opts->critical
@@ -292,7 +294,7 @@ elsif ($np->opts->timestamp) {
   $val = $delta;
 }
 else {
-  $res = $np->check_threshold(
+  $state = $np->check_threshold(
 	check => $val,
 	warning => $np->opts->warning,
 	critical => $np->opts->critical,
@@ -300,17 +302,18 @@ else {
 }
 
 $attr =~ s/.*{([a-z0-9_]+)}$/$1/i;
-my $str = "$attr";
+my $str = "$attr $val";
+
 if ($np->opts->message) {
+  # Template specified. Use that instead.
   $str = $np->opts->message;
   $str =~ s/%a/$attr/g;
   $str =~ s/%v/$val/g;
   my $t = prettytime($val);
   $str =~ s/%t/$t/g;
-} else {
-  $str .= " $val";
 }
 
+# Add perfdata if requested
 if (my $p = $np->opts->perfdata) {
   $str .= "|$attr=$val";
   if (length($p) > 0) {
@@ -319,4 +322,4 @@ if (my $p = $np->opts->perfdata) {
   }
 }
 
-exit_state($res, "$str");
+exit_state($state, $str);
