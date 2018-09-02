@@ -178,7 +178,7 @@ sub get_token {
         syslog('warning', "failed to refresh oath2 token. Trying login.");
         goto Login;   # not nice, but handy :-)
       }
-      syslog('info', "oauth2 token refreshed");
+      syslog('debug', "oauth2 token refreshed");
       $content = decode_json($req->decoded_content);
       $store->{access_token} = $content->{access_token};
       $store->{refresh_token} = $content->{refresh_token};
@@ -202,7 +202,7 @@ sub get_token {
 	]
     );
     exit_error("Unable to login as ".$conf->{username}) unless $req->is_success;
-    syslog('info', "new oauth2 token generated using grant_type password");
+    syslog('debug', "new oauth2 token generated using grant_type password");
     $content = decode_json($req->decoded_content);
     $content->{token_last_updated} = $now->datetime();
     $dirty = 1;
@@ -235,7 +235,7 @@ sub getstationdata() {
     my $req = $ua->post("$API/api/getstationsdata", [ access_token => $token->{access_token} ]);
     exit_error("Data fetch failed: ".$req->status_line) unless $req->is_success;
     $content = decode_json($req->decoded_content);
-    syslog('info', "$RUN/data.json fetched ok");
+    syslog('debug', "$RUN/data.json fetched ok");
     store_json("$RUN/data.json", $content);
   }
   return $content;
