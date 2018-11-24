@@ -88,6 +88,8 @@ Usage: check_netatmo -a attr [-w INT:INT -c INT:INT -T -e equal-str -n not-equal
    Read options from an ini file. See http://nagiosplugins.org/extra-opts
    for usage and examples.
  -a, --attribute {attr}->{attr}
+ -L, --label check_mk_service_label
+   When used as a check_mk_agent plugin, use -L to specify check_mk format and service name.
  -w, --warning INT:INT
  -c, --critical INT:INT
  -T, --timestamp
@@ -98,7 +100,7 @@ Usage: check_netatmo -a attr [-w INT:INT -c INT:INT -T -e equal-str -n not-equal
    critical if equal
  -p, --perfdata [thresholds]
    Nagios performance data format: name=value[:warnlevel[:critlevel[:min[:max]]]]   Format defaults to "label=value"
-   threshols:  warn[;crit[;min[;max]]] - example: -p '25:50:25:50'
+   threshold:  warn[;crit[;min[;max]]] - example: -p '25:50:25:50'
  -m, --message message-template
    Format: 'Value %a is %v' or 'device seen %t ago'
    where %a is attribute name, %v is value and %t is duration

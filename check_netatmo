@@ -96,7 +96,7 @@ $np->add_arg(
 	help => "-p, --perfdata [thresholds]\n" .
 		"   Performance data format: name=value[:warnlevel[:critlevel[:min[:max]]]]".
 		"   Format defaults to \"label=value\"\n" .
-		"   threshols:  warn[;crit[;min[;max]]] - example: -p '25:50:25:50'"
+		"   thresholds:  warn[;crit[;min[;max]]] - example: -p '25:50:25:50'"
 );
 $np->add_arg(
 	spec => 'message|m=s',
