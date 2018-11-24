@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 #
-# Netatmo Weatherstation healthcheck Nagios plugin
-# Version 0.2
+# Netatmo Weatherstation healthcheck monitoring plugin
+# Version 0.3
 #
 # 1) Create your client_id and client_secret at https://dev.netatmo.com.
 #
@@ -17,23 +17,25 @@
 #
 # 180822: 0.1: Intial version
 # 180822: 0.2: Use Nagios::Plugin to parse arguments. All values can now be tested.
+# 181124: 0.3: Use Monitoring::Plugin instead of Nagios.
+#              Can now be used with Check_MK as well (-L option).
 #
 # Soren Juul Moller, Aug 2018
 
 use strict;
 use warnings;
-use Nagios::Plugin;
+use Monitoring::Plugin;
 use Fcntl qw(:flock);
 use File::Path qw(make_path);
 use Sys::Syslog;
 use JSON;
 use LWP::UserAgent;
 use DateTime::Format::DateParse;
-use lib '/opt/plugins';
+use lib qw(/opt/plugins /usr/lib/nagios/plugins);
 use utils qw($TIMEOUT);
 
 my $PROGNAME = "check_netatmo";
-my $VERSION = "0.2";
+my $VERSION = "0.3";
 my $API = "https://api.netatmo.net";
 my $CONFFILE = '/usr/local/etc/netatmo.conf';
 my $RUN = "$ENV{HOME}/var/netatmo";
@@ -42,8 +44,8 @@ my $LOCK;
 
 ##############################################################################
 
-my $np = Nagios::Plugin->new(
-	usage => 'Usage: %s -a attr [-w INT:INT -c INT:INT -T -e equal-str -n not-equal-str -p perfdata -m message-template]',
+my $np = Monitoring::Plugin->new(
+	usage => 'Usage: %s -a attr [-L check_label -w INT:INT -c INT:INT -T -e equal-str -n not-equal-str -p perfdata -m message-template]',
 	version => $VERSION,
 	blurb => 'Netatmo check',
 	extra => "Examples:\n" .
@@ -61,6 +63,10 @@ $np->add_arg(
 	spec => 'attribute|a=s',
 	help => "-a, --attribute {attr}->{attr}",
 	required => 1
+);
+$np->add_arg(
+	spec => 'label|L=s',
+	help => "-L, --label check_mk_service_label"
 );
 $np->add_arg(
 	spec => 'warning|w=s',
@@ -88,7 +94,7 @@ $np->add_arg(
 $np->add_arg(
 	spec => 'perfdata|p:s',
 	help => "-p, --perfdata [thresholds]\n" .
-		"   Nagios performance data format: name=value[:warnlevel[:critlevel[:min[:max]]]]".
+		"   Performance data format: name=value[:warnlevel[:critlevel[:min[:max]]]]".
 		"   Format defaults to \"label=value\"\n" .
 		"   threshols:  warn[;crit[;min[;max]]] - example: -p '25:50:25:50'"
 );
@@ -112,10 +118,18 @@ sub prettytime($) {
   return "${ss}s";
 }
 
-sub exit_state($$) {
-  my ($state, $txt) = @_;
+sub exit_state($$;$) {
+  my ($state, $txt, $perfdata) = @_;
   flock($LOCK, LOCK_UN) if defined $LOCK;
-  print qw(OK WARNING CRITICAL UNKNOWN)[$state] . " - $txt\n";
+  if ($np->opts->label) {
+    # Output in Check_MK plugin format
+    $perfdata = "-" unless defined $perfdata;
+    print $state, " ", $np->opts->label, " ", $perfdata, " ", $txt, "\n";
+  } else {
+    # Otherwise output in Naemon/Nagios/Icinga and compatible format
+    $txt .= "|$perfdata" if defined $perfdata;
+    print qw(OK WARNING CRITICAL UNKNOWN)[$state] . " - $txt\n";
+  }
   closelog();
   exit $state;
 }
@@ -249,7 +263,7 @@ unless (-d $RUN) {
   exit_error("Cannot create $RUN: $!\n") if make_path($RUN, 0755) != 1;
 }
 
-# Just in case of problems, let's not hang Nagios
+# Just in case of problems, let's not hang monitoring engine.
 $SIG{'ALRM'} = sub {
   exit_error("ERROR: No response from $API (timeout)");
 };
@@ -314,12 +328,13 @@ if ($np->opts->message) {
 }
 
 # Add perfdata if requested
+my $perfdata;
 if (my $p = $np->opts->perfdata) {
-  $str .= "|$attr=$val";
+  $perfdata = "$attr=$val";
   if (length($p) > 0) {
-    $p =~ s/:/;/g;
-    $str .= ";$p";
+    $p =~ tr/:/;/;
+    $perfdata .= ";$p";
   }
 }
 
-exit_state($state, $str);
+exit_state($state, $str, $perfdata);
