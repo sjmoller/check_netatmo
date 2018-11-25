@@ -165,7 +165,7 @@ sub load_conf() {
 }
 
 sub get_token {
-  my $ua = LWP::UserAgent->new(agent => "$PROGNAME/$VERSION");
+  my $ua = LWP::UserAgent->new(agent => "$PROGNAME/$VERSION", ssl_opts => { verify_hostname => 0 });
   my $now = DateTime->now();
   my $content;
   my $dirty = 0;

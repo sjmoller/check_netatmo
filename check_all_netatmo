@@ -6,9 +6,6 @@
 #
 # Soren Juul Moller, November 2018
 
-PERL_LWP_SSL_VERIFY_HOSTNAME=0
-export PERL_LWP_SSL_VERIFY_HOSTNAME
-
 echo '<<<check_mk>>>'
 echo 'Version: 0.1'
 echo 'AgentOS: linux'
