@@ -245,7 +245,7 @@ sub getstationdata() {
   if ($needs_update) {
     my $token = get_token();
     exit_error("Login failed") unless defined $token;
-    my $ua = LWP::UserAgent->new(agent => "$PROGNAME/$VERSION");
+    my $ua = LWP::UserAgent->new(agent => "$PROGNAME/$VERSION", ssl_opts => { verify_hostname => 0 });
     my $req = $ua->post("$API/api/getstationsdata", [ access_token => $token->{access_token} ]);
     exit_error("Data fetch failed: ".$req->status_line) unless $req->is_success;
     $content = decode_json($req->decoded_content);
