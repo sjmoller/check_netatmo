@@ -6,8 +6,10 @@
 #
 # Soren Juul Moller, November 2018
 
+VERSION=`check_netatmo -v | cut -d' ' -f2`
+
 echo '<<<check_mk>>>'
-echo 'Version: 0.1'
+echo "Version: $VERSION"
 echo 'AgentOS: linux'
 echo 'OnlyFrom:'
 

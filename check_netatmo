@@ -45,7 +45,7 @@ my $LOCK;
 ##############################################################################
 
 my $np = Monitoring::Plugin->new(
-	usage => 'Usage: %s -a attr [-L check_label -w INT:INT -c INT:INT -T -e equal-str -n not-equal-str -p perfdata -m message-template]',
+	usage => 'Usage: %s -a attr [-L check_label -w INT:INT -c INT:INT -T -e equal-str -n not-equal-str -p perfdata -m message-template -v]',
 	version => $VERSION,
 	blurb => 'Netatmo check',
 	extra => "Examples:\n" .
@@ -103,6 +103,11 @@ $np->add_arg(
 	help => "-m, --message message-template\n" .
 		"   Format: 'Value %a is %v' or 'device seen %t ago'\n" .
 		"   where %a is attribute name, %v is value and %t is duration"
+);
+$np->add_arg(
+	spec => 'version|v',
+	help => "-v, --version\n" .
+		"  Show version"
 );
 $np->getopts;
 
