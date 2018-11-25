@@ -1,0 +1,34 @@
+#!/bin/sh
+#
+# Check_MK local agent extension.
+# Use this script to poll all Netatmo sensors through check_mk agent.
+# Install in $OMD_ROOT/local/bin together with the check_netatmo script.
+#
+# Soren Juul Moller, November 2018
+
+PERL_LWP_SSL_VERIFY_HOSTNAME=0
+export PERL_LWP_SSL_VERIFY_HOSTNAME
+
+echo '<<<check_mk>>>'
+echo 'Version: 0.1'
+echo 'AgentOS: linux'
+echo 'OnlyFrom:'
+
+echo '<<<local>>>'
+check_netatmo -L Indoor_temp -a '{body}->{devices}[0]->{last_status_store}' -T -w3600 -c7200 -p '3600:7200' -m 'Indoor last seen %t ago'
+check_netatmo -L Netatmo_server_status -a {status} -e ok
+check_netatmo -L Outdoor_RF_status -a '{body}->{devices}[0]->{modules}[0]->{rf_status}' -w120 -c150 -p '120:150:40:200'
+check_netatmo -L Outdoor_batteri_pct -a '{body}->{devices}[0]->{modules}[0]->{battery_percent}' -w12: -c6: -p '12:6:0:100'
+check_netatmo -L Outdoor_batteri_voltage -a '{body}->{devices}[0]->{modules}[0]->{battery_vp}' -w4500: -c4000: -p '4500:4000:3500:6500'
+check_netatmo -L Outdoor_timestamp -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -T -w3600 -c7200 -p '3600:7200' -m 'Outdoor last seen %t ago'
+check_netatmo -L Rain_Gauge_RF_status -a '{body}->{devices}[0]->{modules}[1]->{rf_status}' -w:120 -c:150 -p '120:150:40:200'
+check_netatmo -L Rain_Gauge_battery_pct -a '{body}->{devices}[0]->{modules}[1]->{battery_percent}' -w12: -c6: -p '12:6:0:100'
+check_netatmo -L Rain_Gauge_battery_voltage -a '{body}->{devices}[0]->{modules}[1]->{battery_vp}' -w4770: -c4360: -p '4770:4360:3500:6500'
+check_netatmo -L Rain_Gauge_timestamp -a '{body}->{devices}[0]->{modules}[1]->{last_seen}' -T -w3600 -c7200 -p '3600:7200' -m 'Rain Gauge last seen %t ago'
+check_netatmo -L WiFi_status -a '{body}->{devices}[0]->{wifi_status}' -w75 -c86 -p '75:86:40:100'
+check_netatmo -L Wind_Gauge_RF_status -a '{body}->{devices}[0]->{modules}[2]->{rf_status}' -w120 -c150 -p '120:150:40:200'
+check_netatmo -L Wind_Gauge_battery_pct -a '{body}->{devices}[0]->{modules}[2]->{battery_percent}' -w12: -c6: -p '12:6:0:100'
+check_netatmo -L Wind_Gauge_battery_voltage -a '{body}->{devices}[0]->{modules}[2]->{battery_vp}' -w4770: -c4360: -p '4770:4360:3500:6500'
+check_netatmo -L Wind_Gauge_timestamp -a '{body}->{devices}[0]->{modules}[2]->{last_seen}' -T -w3600 -c7200 -p '3600:7200' -m 'Wind Gauge last seen %t ago'
+
+exit $?

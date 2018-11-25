@@ -28,6 +28,9 @@ something to notify me when my Netatmo needed service, like new batteries.
     command_name: check_netatmo
     command_line: $USER1$/check_netatmo $ARG1$
 
+  When using Check_MK monitoring, add Netatmo as a host without IP and define a
+  "Individual program call instead of agent access" datasource program.
+
 4. Define "Netatmo" host and services.
 
    - Add "Netatmo" as a host. Replace the host-alive check with
