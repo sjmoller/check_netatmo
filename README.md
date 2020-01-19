@@ -35,7 +35,7 @@ something to notify me when my Netatmo needed service, like new batteries.
 
    - Add "Netatmo" as a host. Replace the host-alive check with
 
-    check_netatmo -a '{body}->{status}' -e ok
+    check_netatmo -d 01:02:03:04:05:06 -a '{status}' -e ok
 
 5. Define Netatmo service checks
 
@@ -45,36 +45,37 @@ something to notify me when my Netatmo needed service, like new batteries.
 
   - Indoor timestamp:
 
-    check_netatmo -a '{body}->{devices}[0]->{last_status_store}' -T -w3600 -c7200 -p '3600:7200' -m 'Indoor last seen %t ago'
+    check_netatmo -d aa:bb:cc:dd:ee:ff -a '{last_status_store}' -T -w3600 -c7200 -p '3600:7200' -m 'Indoor last seen %t ago'
 
   - Outdoor RF status:
 
-    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{rf_status}' -w120 -c150 -p '120:150:40:200'
+    check_netatmo -d aa:bb:cc:dd:ee:ff -M Outdoor -a '{rf_status}' -w120 -c150 -p '120:150:40:200'
 
   - Outdoor battery voltage:
 
-    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{battery_vp}' -w4500: -c4000: -p '4500:4000:3500:6500'
+    check_netatmo -d aa:bb:cc:dd:ee:ff -M Outdoor -a '{battery_vp}' -w4500: -c4000: -p '4500:4000:3500:6500'
 
   - Outdoor timestamp:
 
-    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -T -w3600 -c7200 -p '3600:7200' -m 'Outdoor last seen %t ago'
+    check_netatmo -d -d aa:bb:cc:dd:ee:ff -M Outdoor -a '{last_seen}' -T -w3600 -c7200 -p '3600:7200' -m 'Outdoor last seen %t ago'
 
-  - ... the same from rain and wind gauge, just with module index 1 and 2.
+  - ... the same from rain and wind gauge, just with module name 'Rain Gauge' or 'Wind Gauge'
 
   - WIFI status:
 
-    check_netatmo -a '{body}->{devices}[0]->{wifi_status}' -w75 -c86 -p '75:86:40:100'
+    check_netatmo -d aa:bb:cc:dd:ee:ff -a '{wifi_status}' -w75 -c86 -p '75:86:40:100'
 
 If you prefer, you can also check battery using percent:
 
-    check_netatmo -a '{body}->{devices}[0]->{modules}[0]->{battery_percent}' -w12: -c6: -p '12:6:0:100'
+    check_netatmo -d aa:bb:cc:dd:ee:ff -a '{battery_percent}' -w12: -c6: -p '12:6:0:100'
 
 Exotic checks can also be done:<br />
 Give a warning if wind angle is between 220 and 280, and a critical if wind angle is between 281 and 330
 
-    check_netatmo -a '{body}->{devices}[0]->{modules}[2]->{dashboard_data}->{WindAngle}' -w@220:280 -c@281:330 -m 'Wind angle is %v degrees'
+    check_netatmo -d aa:bb:cc:dd:ee:ff -M 'Wind Gauge' -a '{dashboard_data}->{WindAngle}' -w@220:280 -c@281:330 -m 'Wind angle is %v degrees'
 
-See $HOME/var/netatmo/data.json for possible values to check. $HOME is the home for the user running your monitoring.
+See $HOME/var/netatmo/weatherstation.json for possible values to check. $HOME is the home for the user running your monitoring.
+Also see check_all_netatmo script used in CheckMK as an example.
 
 ### Usage ###
 
@@ -90,7 +91,11 @@ Usage: check_netatmo -a attr [-w INT:INT -c INT:INT -T -e equal-str -n not-equal
  --extra-opts=[section][@file]
    Read options from an ini file. See http://nagiosplugins.org/extra-opts
    for usage and examples.
- -a, --attribute {attr}->{attr}
+ -d, --deviceid MAC-address
+   You mush specify the MAC address of your Indoor module here.
+ -M, --module module-name
+   If accessing module data.
+ -a, --attribute {attr}->{attr}->....
  -L, --label check_mk_service_label
    When used as a check_mk_agent plugin, use -L to specify check_mk format and service name.
  -w, --warning INT:INT

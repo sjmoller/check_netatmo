@@ -19,6 +19,8 @@
 # 180822: 0.2: Use Nagios::Plugin to parse arguments. All values can now be tested.
 # 181124: 0.3: Use Monitoring::Plugin instead of Nagios.
 #              Can now be used with Check_MK as well (-L option).
+# 181126: 0.4: When trouble, do not exit with UNKNOWN. Let monitor system decide when data is too old.
+# 200119: 0.5: Use Netatmo module to fetch data.
 #
 # Soren Juul Moller, Aug 2018
 
@@ -28,36 +30,43 @@ use Monitoring::Plugin;
 use Fcntl qw(:flock);
 use File::Path qw(make_path);
 use Sys::Syslog;
+use lib '.';
+use Netatmo;
 use JSON;
-use LWP::UserAgent;
 use DateTime::Format::DateParse;
 use lib qw(/opt/plugins /usr/lib/nagios/plugins);
 use utils qw($TIMEOUT);
 
 my $PROGNAME = "check_netatmo";
-my $VERSION = "0.3";
-my $API = "https://api.netatmo.net";
+my $VERSION = "0.5";
 my $CONFFILE = '/usr/local/etc/netatmo.conf';
-my $RUN = "$ENV{HOME}/var/netatmo";
-my $CACHE_TTL = 600;	# 10 min data cache
-my $LOCK;
 
 ##############################################################################
 
 my $np = Monitoring::Plugin->new(
-	usage => 'Usage: %s -a attr [-L check_label -w INT:INT -c INT:INT -T -e equal-str -n not-equal-str -p perfdata -m message-template -v]',
+	usage => 'Usage: %s -d device-id [-M module-name] -a attr [-L label -w INT:INT -c INT:INT -T -e equal-str -n not-equal-str -p perfdata -m message-template -v]',
 	version => $VERSION,
 	blurb => 'Netatmo check',
 	extra => "Examples:\n" .
-		 "   $PROGNAME -a '{body}->{devices}[0]->{dashboard_data}->{Temperature}' -w28: -c32: -p '28:32:28:32'    (Indoor temperature)\n" .
-		 "   $PROGNAME -a '{body}->{devices}[0]->{modules}[0]->{last_seen}' -T -w:3600 -c:7200 -m 'Outdoor seen %t ago'   (Outdoor timestamp)\n" .
-		 "   $PROGNAME -a '{body}->{devices}[0]->{modules}[2]->{dashboard_data}->{WindAngle}' -w\@220:280 -c\@280:330  (wind angle)\n".
-		 "   $PROGNAME -a '{body}->{status}' -e ok\n" .
-		 "see also https://nagios-plugins.org/doc/guidelines.html#THRESHOLDFORMAT",
+		 "   $PROGNAME -d device-id -a '{dashboard_data}->{Temperature}' -w28: -c32: -p '28:32:28:32'    (Indoor temperature)\n" .
+		 "   $PROGNAME -d device-id -M Outdoor -a '{last_seen}' -T -w:3600 -c:7200 -m 'Outdoor seen %t ago'   (Outdoor timestamp)\n" .
+		 "   $PROGNAME -d device-id -M 'Wind Gauge' -a '{dashboard_data}->{WindAngle}' -w\@220:280 -c\@280:330  (wind angle)\n".
+		 "   $PROGNAME -d device-id -a '{status}' -e ok\n" .
+		 "device-id is the Indoor module MAC address\n".
+		 "See also https://nagios-plugins.org/doc/guidelines.html#THRESHOLDFORMAT",
 	url => 'https://github.com/sjmoller/check_netatmo',
 	plugin => $PROGNAME,
 	timeout => 15,
 	shortname => 'Netatmo'
+);
+$np->add_arg(
+	spec => 'deviceid|d=s',
+	help => '-d, --deviceid mac-address',
+	required => 1
+);
+$np->add_arg(
+	spec => 'module|M=s',
+	help => '-M, --module module-name'
 );
 $np->add_arg(
 	spec => 'attribute|a=s',
@@ -113,6 +122,8 @@ $np->getopts;
 
 ##############################################################################
 
+my $LOCK;
+
 sub prettytime($) {
   my $secs = shift;
   my ($ss,$mi,$hh,$dd,$mm,$yy,@rest) = gmtime($secs);
@@ -145,132 +156,13 @@ sub exit_error($) {
   exit_state(UNKNOWN, $txt);
 }
 
-sub load_json($) {
-  my $file = shift;
-  local $/;  # enable slurp
-  open(my $fh, '<', $file) || exit_error("$file read error: $!");
-  my $json = <$fh>;
-  close($fh);
-  return from_json($json);
-}
-
-sub store_json($$) {
-  my ($file, $hashref) = @_;
-  open(my $fh, '>', $file) || exit_error("cannot create $file: $!");
-  print $fh to_json($hashref, { utf8 => 1, pretty => 1 });
-  close($fh);
-}
-
-sub load_conf() {
-  my $conf = load_json($CONFFILE);
-  foreach (qw(client_id client_secret username password)) {
-    exit_error("$_ not defined in $CONFFILE") unless defined $conf->{$_};
-  }
-  return $conf;
-}
-
-sub get_token {
-  my $ua = LWP::UserAgent->new(agent => "$PROGNAME/$VERSION", ssl_opts => { verify_hostname => 0 });
-  my $now = DateTime->now();
-  my $content;
-  my $dirty = 0;
-  my $conf;
-
-  if (-s "$RUN/token.json") {
-    # Got a cache file, refresh login
-    my $store = load_json("$RUN/token.json");
-    my $lastupdate = DateTime::Format::DateParse->parse_datetime($store->{token_last_updated}, 'UTC');
-    my $delta = $now->epoch() - $lastupdate->epoch();
-    if ($delta > ($store->{expires_in} - 900)) {
-      # Refresh token
-      $conf = load_conf();
-      my $req = $ua->post(
-          "$API/oauth2/token",
-	  [
-	    grant_type => 'refresh_token',
-	    client_id => $conf->{client_id},
-	    client_secret => $conf->{client_secret},
-	    refresh_token => $store->{refresh_token}
-	  ]
-      );
-      if (!$req->is_success) {
-        syslog('warning', "failed to refresh oath2 token. Trying login.");
-        goto Login;   # not nice, but handy :-)
-      }
-      syslog('debug', "oauth2 token refreshed");
-      $content = decode_json($req->decoded_content);
-      $store->{access_token} = $content->{access_token};
-      $store->{refresh_token} = $content->{refresh_token};
-      $store->{token_last_updated} = $now->datetime();
-      $dirty = 1;
-    }
-    $content = $store;
-  } else {
-    # No cache file or oauth2 refresh failed. Do login
-    Login:
-    $conf = load_conf() unless defined $conf;
-    my $req = $ua->post(
-	"$API/oauth2/token",
-	[
-	  grant_type => 'password',
-	  client_id => $conf->{client_id},
-	  client_secret => $conf->{client_secret},
-	  username => $conf->{username},
-	  password => $conf->{password},
-	  scope => 'read_station'
-	]
-    );
-    exit_error("Unable to login as ".$conf->{username}) unless $req->is_success;
-    syslog('debug', "new oauth2 token generated using grant_type password");
-    $content = decode_json($req->decoded_content);
-    $content->{token_last_updated} = $now->datetime();
-    $dirty = 1;
-  }
-
-  # Update store if token was updated
-  store_json("$RUN/token.json", $content) if $dirty;
-
-  return $content;
-}
-
-sub getstationdata() {
-  my $now = DateTime->now();
-  my $content;
-  my $needs_update = 0;
-
-  if (-s "$RUN/data.json") {
-    $content = load_json("$RUN/data.json");
-    my $lastupdate = $content->{time_server};
-    my $delta = $now->epoch() - $lastupdate;
-    $needs_update = 1 if $delta > $CACHE_TTL;
-  } else {
-    $needs_update = 1;
-  }
-
-  if ($needs_update) {
-    my $token = get_token();
-    exit_error("Login failed") unless defined $token;
-    my $ua = LWP::UserAgent->new(agent => "$PROGNAME/$VERSION", ssl_opts => { verify_hostname => 0 });
-    my $req = $ua->post("$API/api/getstationsdata", [ access_token => $token->{access_token} ]);
-    exit_error("Data fetch failed: ".$req->status_line) unless $req->is_success;
-    $content = decode_json($req->decoded_content);
-    syslog('debug', "$RUN/data.json fetched ok");
-    store_json("$RUN/data.json", $content);
-  }
-  return $content;
-}
-
 ##############################################################################
 
 openlog('check_netatmo', 'nofatal', 'local0');
 
-unless (-d $RUN) {
-  exit_error("Cannot create $RUN: $!\n") if make_path($RUN, 0755) != 1;
-}
-
 # Just in case of problems, let's not hang monitoring engine.
 $SIG{'ALRM'} = sub {
-  exit_error("ERROR: No response from $API (timeout)");
+  syslog('err', "No response from API (timeout)");
 };
 alarm($TIMEOUT);
 
@@ -278,7 +170,8 @@ alarm($TIMEOUT);
 open($LOCK, '<', $CONFFILE) || exit_error("Cannot open $CONFFILE");
 flock($LOCK, LOCK_EX) || exit_error("Cannot lock $CONFFILE");
 
-my $data = getstationdata();
+my $na = NetatmoConnection->new(conffile => $CONFFILE);
+my $data = $na->getWeatherStation;
 
 # Release lock
 flock($LOCK, LOCK_UN);
@@ -287,13 +180,22 @@ undef $LOCK;
 
 alarm(0);
 
+my $dev = $data->deviceByID($np->opts->deviceid);
+exit_error("Device ".$np->opts->deviceid." not found") unless defined $dev;
+$dev->{status} = $data->{status};
+
+if ($np->opts->module) {
+  $dev = $dev->moduleByName($np->opts->module);
+  exit_error("Module ".$np->opts->module." not found") unless defined $dev;
+}
+
 my $attr = $np->opts->attribute;
 
 # remove dangerous characters before eval
 $attr =~ tr/;()|\`\'\"\\/_/;
 
 my $val;
-eval '$val = $data->'.$attr;
+eval '$val = $dev->'.$attr;
 exit_error("$attr not found") unless defined $val;
 
 my $state = OK;
