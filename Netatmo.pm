@@ -392,9 +392,13 @@ sub getroommeasure {
     my $url = URI->new("$API/api/getroommeasure");
     $url->query_form(home_id => $self->{home}->{id}, room_id => $self->{id}, %opts);
     my $res = $ua->get($url);
-    return [] unless $res->is_success;
-    $json = from_json($res->decoded_content);
-    NetatmoUtils::store_json($cachefile, $json) if defined $cachefile;
+    if ($res->is_success) {
+      $json = from_json($res->decoded_content);
+      NetatmoUtils::store_json($cachefile, $json) if defined $cachefile;
+    } else {
+      $self->{error} = $res->status_line;
+      return [];
+    }
   }
 
   my @temps = ();
